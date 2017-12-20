@@ -5,12 +5,13 @@
 from pandas_datareader import data as web
 import os
 import pandas as pd
-import EDef as en
+import enum_def as en
 import vol_fitter as v
 import corr_util as cu
 import numpy as np
 
-class MktData:
+#market data env class, which will setup the env for the application
+class mde:
     
     def __init__(self, tickers, returnFreq, startDt, endDt, dataSrc = 'yahoo', storageDir = "."):
         self.returnFreq = returnFreq

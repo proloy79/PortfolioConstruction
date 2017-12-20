@@ -8,7 +8,7 @@ import datetime as dt
 import market_data as mkt
 import matplotlib.pyplot as plt
 import pandas as pd
-import EDef as en
+import enum_def as en
 
 dataSrc = 'yahoo'
 tickers = ['AAPL', 'MSFT', '^GSPC']
