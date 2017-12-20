@@ -7,13 +7,13 @@ import numpy as np
 import math
 
 #fits the vol using GJR
-class Vol:
+class vol:
     
     def __init__(self, ticker, quotes):        
         self.ticker = ticker
         self.quotes = quotes        
         
-    #using the GJR-GARCH model                
+    #using the GJR-GARCH model to fit the vol                
     def fit_vol(self):                                    
         am = arch_model(self.quotes.pct_change().dropna(),p=1, o=1, q=1)
         result = am.fit()  
@@ -26,7 +26,7 @@ class Vol:
 
         #below terms are used in forecasting        
         self.persistence = self.alpha + 0.5*self.gamma + self.beta
-        self.averageVol = self.omega/(1-self.persitence)
+        self.averageVol = self.omega/(1-self.persistence)
         
         #print(result.params)
                 

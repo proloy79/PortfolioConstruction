@@ -6,9 +6,10 @@ from pandas_datareader import data as web
 import os
 import pandas as pd
 import enum_def as en
-import vol_fitter as v
+import vol_fitter as vf
 import corr_util as cu
 import numpy as np
+import quote_ts as qt
 
 #market data env class, which will setup the env for the application
 class mde:
@@ -21,6 +22,8 @@ class mde:
         self.tickers = tickers
         self.storageDir = storageDir        
         self.vols = {}
+        self.returns = {}
+        self.equilibriumWts = {}
         stDtS = startDt.strftime('%Y%m%d')
         endDtS = endDt.strftime('%Y%m%d')
         self.rawDataFile = os.path.join(os.path.realpath(self.storageDir), stDtS + '_' + endDtS 
@@ -40,22 +43,41 @@ class mde:
             df = yahooData.ix['Adj Close']
             df["Date"] = df.index 
             df.drop('Date', axis=1, inplace=True)           
-            returns = df
+            quotes = df
             
             if self.returnFreq == en.ReturnFreq.WEEKLY:
-                 returns = df.resample('W', how=lambda x: x[-1])
+                quotes = df.resample('W', how=lambda x: x[-1])                
             elif self.returnFreq == en.ReturnFreq.MONTHLY:   
-                returns = df.resample('M', how=lambda x: x[-1])
+                quotes = df.resample('M', how=lambda x: x[-1])                
             elif self.returnFreq == en.ReturnFreq.ANNUALY:   
-                returns = df.resample('Y', how=lambda x: x[-1])
+                quotes = df.resample('Y', how=lambda x: x[-1])     
                 
-            returns.to_excel(writer, 'Adj Close')
+            quotes.to_excel(writer, 'Adj Close')
             writer.save()
 
-    def populate(self):
-        self.load_vols()
-        self.generate_corr()
-        self.create_covariance_matrix()
+    def prepare_env(self):
+        self.load_weights()
+        #self.load_vols()        
+        #self.create_covariance_matrix()
+    
+    def load_returns(self):                                    
+        data = pd.read_excel(self.rawDataFile,sheetname='Adj Close')
+            
+        for ticker in self.tickers:                        
+            rtn = qt.quotes(ticker, data[ticker],  data['Date'])
+            self.returns[ticker] = rtn
+    
+    def load_weights(self):  
+        xlData = pd.read_excel("../IdxWeight.xlsx",sheetname='IdxWt')                                          
+        df = pd.DataFrame(xlData)
+        df = df.drop(axis=1,labels=['Name','Sector'])
+        df = df.set_index('Symbol')
+        
+        for ticker in self.tickers:                                                
+            self.equilibriumWts[ticker] = df.get_value(ticker, 'Weight')
+        
+        print('\nweights :')
+        print(self.wts)    
         
     #reads the data in xl and fits the volatility using GJR-GARCH
     #this fillted vol(s) is saved in dictionary vol and also saved to output/from_to_vol.xlsx
@@ -65,9 +87,9 @@ class mde:
         
         volData = {}    
         volData['Date'] = data['Date'][1:]
-        print(len(volData['Date']))
+        
         for ticker in self.tickers:            
-            vol = v.Vol(ticker, data[ticker])
+            vol = vf.vol(ticker, data[ticker])
             vol.fit_vol()
             self.vols[ticker] = vol            
             volData[ticker] = vol.stdDev           
@@ -87,19 +109,24 @@ class mde:
                                          
         self.corr = cu.generate_rank_corr(corrInput)
         
-        print('\ncorrelations are:')
+        print('\ncorrelations :')
         print(self.corr) 
         
     def create_covariance_matrix(self):                     
-        arr = []
+        stdDevs = []
         
         for ticker in self.tickers:            
-            arr.append(self.vols[ticker].stdDev[-1])
+            stdDevs.append(self.vols[ticker].stdDev[-1])
                                
-        darr = np.diag(arr)        
-        df = pd.DataFrame(darr, columns=self.tickers)          
-        self.covariance = df.cov()
+        dStdDevs = np.diag(stdDevs)        
+        dfStdDevs = pd.DataFrame(dStdDevs, columns=self.tickers)  
         
-        print('\ncovariances are:')
+        print('\nstd devs :')
+        print(dfStdDevs)
+        
+        self.generate_corr()        
+        self.covariance = np.dot(np.dot(dfStdDevs,self.corr),dfStdDevs)
+        
+        print('\ncovariances :')
         print(self.covariance) 
             

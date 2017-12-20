@@ -4,14 +4,14 @@
 """
 
 import datetime as dt
-#from dateutil.relativedelta import relativedelta
 import market_data as mkt
-import matplotlib.pyplot as plt
-import pandas as pd
 import enum_def as en
+from dateutil.relativedelta import relativedelta
+import matplotlib.pyplot as plt
+
 
 dataSrc = 'yahoo'
-tickers = ['AAPL', 'MSFT', '^GSPC']
+tickers = ['AAPL', 'ABT', 'AJG', 'APA', 'TEL']
 #tickers = ['AAPL']
 
 #uncomment to work with a fresh set if required
@@ -19,15 +19,15 @@ tickers = ['AAPL', 'MSFT', '^GSPC']
 #endDt = dt.date.today()
 #startDt =dt.date.today() - relativedelta(years=4)
 
-startDt = dt.date(2013,12,18)
+startDt = dt.date(2012,1,1)
 endDt = dt.date(2017,12,17)
 
-mktData = mkt.MktData(tickers, en.ReturnFreq.WEEKLY, startDt, endDt)
+mde = mkt.mde(tickers, en.ReturnFreq.WEEKLY, startDt, endDt)
 
 #uncomment if you need to reload the data from yahoo
-#mktData.import_data()
+#mde.import_data()
 
-mktData.populate()
+mde.prepare_env()
 
 #for ticker in volObj.tickers:
 #    volResult = volObj.volResult[ticker]
