@@ -14,7 +14,7 @@ import quote_ts as qt
 #market data env class, which will setup the env for the application
 class mde:
     
-    def __init__(self, tickers, returnFreq, startDt, endDt, dataSrc = 'yahoo', storageDir = "."):
+    def __init__(self, tickers, returnFreq, startDt, endDt, dataSrc = 'yahoo', storageDir = "./../"):
         self.returnFreq = returnFreq
         self.startDt = startDt
         self.endDt = endDt
@@ -26,23 +26,52 @@ class mde:
         self.equilibriumWts = {}
         stDtS = startDt.strftime('%Y%m%d')
         endDtS = endDt.strftime('%Y%m%d')
-        self.rawDataFile = os.path.join(os.path.realpath(self.storageDir), stDtS + '_' + endDtS 
-                                  + '_' + dataSrc + '-data.xlsx')  
+        
+        dataDir = os.path.join(os.path.realpath(self.storageDir),'data')
+        self.rawDataFile = os.path.join(dataDir, stDtS + '_' + endDtS 
+                                  + '_' + dataSrc + '-data1.xlsx')  
         outputDir = os.path.join(os.path.realpath(self.storageDir),'output')
         self.fittedVolFile = os.path.join(outputDir, stDtS + '_' + endDtS 
                                   + '_' + 'vols.xlsx')        
         if not os.path.exists(outputDir):
             os.makedirs(outputDir)
-            
+    
     #reads the tic(s) data from the data source and saves in to a xl file(from_to_dataSrc-data.xlsx)
     def import_data(self):          
         writer = pd.ExcelWriter(self.rawDataFile)        
         for ticker in self.tickers:
             print(ticker)
+            df = web.DataReader(self.tickers, self.dataSrc, self.startDt, self.endDt)                                    
+            df.to_excel(writer)
+            writer.save()                
+    
+    def read_xl_db(self, sheetName):          
+        data = pd.read_excel(self.rawDataFile,sheetname=sheetName)
+        df = data.sort_values('Date')
+        df = df.set_index('Date')
+        #df["Date"] = df.index 
+        #df.drop('Date', axis=1, inplace=True)           
+        print(df)
+        filteredDf = df
+        
+        if self.returnFreq == en.ReturnFreq.WEEKLY:
+            filteredDf = df.resample('W', how=lambda x: x[-1])                
+        elif self.returnFreq == en.ReturnFreq.MONTHLY:   
+            filteredDf = df.resample('M', how=lambda x: x[-1])                
+        elif self.returnFreq == en.ReturnFreq.ANNUALY:   
+            filteredDf = df.resample('Y', how=lambda x: x[-1])   
+            
+        return filteredDf   
+                
+    #reads the tic(s) data from the data source and saves in to a xl file(from_to_dataSrc-data.xlsx)
+    def import_data1(self):          
+        writer = pd.ExcelWriter(self.rawDataFile)        
+        for ticker in self.tickers:
+            print(ticker)
             yahooData = web.DataReader(self.tickers, self.dataSrc, self.startDt, self.endDt)
-            df = yahooData.ix['Adj Close']
+            df = yahooData.ix['Adj Close']            
             df["Date"] = df.index 
-            df.drop('Date', axis=1, inplace=True)           
+            #df.drop('Date', axis=1, inplace=True)           
             quotes = df
             
             if self.returnFreq == en.ReturnFreq.WEEKLY:
@@ -54,42 +83,64 @@ class mde:
                 
             quotes.to_excel(writer, 'Adj Close')
             writer.save()
-
-    def prepare_env(self):
+               
+    def prepare_env(self):        
+        self.load_vols()        
         self.load_weights()
-        #self.load_vols()        
-        #self.create_covariance_matrix()
+        self.create_covariance_matrix()
     
     def load_returns(self):                                    
-        data = pd.read_excel(self.rawDataFile,sheetname='Adj Close')
-            
+        #data = pd.read_excel(self.rawDataFile,sheetname='Adj Close')
+        #df = data.sort_values('Date')  
+        
+        df = self.read_xl_db('Adj Close')
+        
         for ticker in self.tickers:                        
-            rtn = qt.quotes(ticker, data[ticker],  data['Date'])
+            rtn = qt.quotes(ticker, df[ticker],  df.index.values)            
             self.returns[ticker] = rtn
     
-    def load_weights(self):  
-        xlData = pd.read_excel("../IdxWeight.xlsx",sheetname='IdxWt')                                          
+    def load_weights(self):   
+        #df = pd.read_excel(self.rawDataFile,sheetname='Adj Close')
+        df = self.read_xl_db('Adj Close')        
+        priceRow = df.iloc[1][1:]
+        
+        #df = pd.read_excel(self.rawDataFile,sheetname='Volume')        
+        df = self.read_xl_db('Volume')
+        volRow = df.iloc[1][1:]
+        
+        total = np.dot(priceRow*np.column_stack(volRow))
+        wts = priceRow/total
+        print(wts)
+        
+            
+            
+        dataDir = os.path.join(os.path.realpath(self.storageDir),'data')
+        idxWtFile = os.path.join(dataDir,'IdxWeight.xlsx') 
+        xlData = pd.read_excel(idxWtFile,sheetname='IdxWt')  
+                                        
         df = pd.DataFrame(xlData)
         df = df.drop(axis=1,labels=['Name','Sector'])
         df = df.set_index('Symbol')
         
         for ticker in self.tickers:                                                
-            self.equilibriumWts[ticker] = df.get_value(ticker, 'Weight')
-        
-        print('\nweights :')
-        print(self.wts)    
+            self.equilibriumWts[ticker] = df.get_value(ticker, 'Weight')/100.
+                
+        print('\nequilibriumWts :')
+        print(self.equilibriumWts)    
         
     #reads the data in xl and fits the volatility using GJR-GARCH
     #this fillted vol(s) is saved in dictionary vol and also saved to output/from_to_vol.xlsx
     def load_vols(self):                    
         writer = pd.ExcelWriter(self.fittedVolFile)         
-        data = pd.read_excel(self.rawDataFile,sheetname='Adj Close')
+        #df = pd.read_excel(self.rawDataFile,sheetname='Adj Close')
+        #data = df.sort_values('Date')
+        df = self.read_xl_db('Adj Close')
         
         volData = {}    
-        volData['Date'] = data['Date'][1:]
+        volData['Date'] = df.index.values[1:]
         
         for ticker in self.tickers:            
-            vol = vf.vol(ticker, data[ticker])
+            vol = vf.vol(ticker, df[ticker])
             vol.fit_vol()
             self.vols[ticker] = vol            
             volData[ticker] = vol.stdDev           
