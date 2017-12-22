@@ -17,7 +17,7 @@ def import_data(tickers, dataSrc, startDt, endDt, rawDataFile):
         df = web.DataReader(tickers, dataSrc, startDt, endDt)                                    
         df.to_excel(writer)
         writer.save()
-        
+
 #market data env class, which will setup the env for the application
 class mde:
     
@@ -52,27 +52,30 @@ class mde:
         
         return filteredDf   
                 
-#    #reads the tic(s) data from the data source and saves in to a xl file(from_to_dataSrc-data.xlsx)
-#    def import_data1(self):          
-#        writer = pd.ExcelWriter(self.rawDataFile)        
-#        for ticker in self.tickers:
-#            print(ticker)
-#            yahooData = web.DataReader(self.tickers, self.dataSrc, self.startDt, self.endDt)
-#            df = yahooData.ix['Adj Close']            
-#            df["Date"] = df.index 
-#            #df.drop('Date', axis=1, inplace=True)           
-#            quotes = df
-#            
-#            if self.returnFreq == en.ReturnFreq.WEEKLY:
-#                quotes = df.resample('W', how=lambda x: x[-1])                
-#            elif self.returnFreq == en.ReturnFreq.MONTHLY:   
-#                quotes = df.resample('M', how=lambda x: x[-1])                
-#            elif self.returnFreq == en.ReturnFreq.ANNUALY:   
-#                quotes = df.resample('Y', how=lambda x: x[-1])     
-#                
-#            quotes.to_excel(writer, 'Adj Close')
-#            writer.save()
-               
+    def serialize_to_file(self, writer):        
+        self.read_xl_db('Adj Close').to_excel(writer, 'Adj Close')                      
+        self.read_xl_db('Volume').to_excel(writer, 'Volume')     
+         
+        params = {}
+        logRtns = {}
+        stdDevs = {}        
+        
+        for ticker in self.tickers:                        
+            params[ticker] = self.vols[ticker].params             
+            logRtns[ticker] = self.vols[ticker].logRtn
+            stdDevs[ticker] = self.vols[ticker].conditionalVol                       
+            
+        pd.DataFrame(params).to_excel(writer, 'VolFitParams',index=params.keys())        
+        pd.DataFrame(logRtns).to_excel(writer, 'LogRtns')     
+        pd.DataFrame(stdDevs).to_excel(writer, 'ConditionalVol')             
+        self.corr.to_excel(writer, 'Corr')        
+        self.stdDevMatrix.to_excel(writer, 'StdDevMatrix')        
+        pd.DataFrame(self.covariance).to_excel(writer, 'Covariance')
+        pd.DataFrame(self.equilibriumWts,index=self.tickers, columns=['EquilibriumWt']).to_excel(writer, 'EqWts')        
+        
+        writer.save()
+        
+        
     def prepare_env(self):        
         self.load_vols()        
         self.load_equlibrium_wts()
@@ -90,9 +93,9 @@ class mde:
         priceRow = df.iloc[1][0:].values                
         df = self.read_xl_db('Volume')        
         volumeRow = df.iloc[1][0:].values        
-        marktCap =  np.column_stack(priceRow * volumeRow)
-        total = marktCap.sum()
-        self.equilibriumWts = np.column_stack(list(map(lambda x: x/total, marktCap)))
+        marketCap =  np.column_stack(priceRow * volumeRow)
+        total = marketCap.sum()
+        self.equilibriumWts = np.column_stack(list(map(lambda x: x/total, marketCap)))
                 
         print('\nequilibriumWts :')
         print(self.equilibriumWts)
@@ -101,44 +104,19 @@ class mde:
     #this fillted vol(s) is saved in dictionary vol and also saved to output/from_to_vol.xlsx
     def load_vols(self):                            
         df = self.read_xl_db('Adj Close')
+        debugParams = {}
         
         for ticker in self.tickers:            
             vol = vf.vol(ticker, df[ticker])
             vol.fit_vol()
             self.vols[ticker] = vol            
-            
-
-# =============================================================================
-#     #reads the data in xl and fits the volatility using GJR-GARCH
-#     #this fillted vol(s) is saved in dictionary vol and also saved to output/from_to_vol.xlsx
-#     def load_vols_old(self):                    
-#         writer = pd.ExcelWriter(self.fittedVolFile)         
-#         #df = pd.read_excel(self.rawDataFile,sheetname='Adj Close')
-#         #data = df.sort_values('Date')
-#         df = self.read_xl_db('Adj Close')
-#         
-#         volData = {}    
-#         volData['Date'] = df.index.values[1:]
-#         
-#         for ticker in self.tickers:            
-#             vol = vf.vol(ticker, df[ticker])
-#             vol.fit_vol()
-#             self.vols[ticker] = vol            
-#             volData[ticker] = vol.stdDev           
-#         
-#         cols = ['Date']
-#         cols.extend(self.tickers)
-#         #print(volData)
-#         allData = pd.DataFrame(volData, columns = cols)
-#         allData.to_excel(writer, "vols", index=False)
-#         writer.save()  
-# =============================================================================
-            
+            debugParams[ticker]  = vol.params
+                    
     def generate_corr(self):                     
         corrInput = {}
         
         for ticker in self.tickers:            
-            corrInput[ticker] = self.vols[ticker].stdDev
+            corrInput[ticker] = self.vols[ticker].conditionalVol
                                          
         self.corr = cu.generate_rank_corr(corrInput)
         
@@ -146,19 +124,20 @@ class mde:
         print(self.corr) 
         
     def create_covariance_matrix(self):                     
-        stdDevs = []
+        condVols = []
         
         for ticker in self.tickers:            
-            stdDevs.append(self.vols[ticker].stdDev[-1])
+            condVols.append(self.vols[ticker].conditionalVol[-1])
                                
-        dStdDevs = np.diag(stdDevs)        
-        dfStdDevs = pd.DataFrame(dStdDevs, columns=self.tickers)  
+        diagCondVols = np.diag(condVols)        
+        self.stdDevMatrix = pd.DataFrame(diagCondVols,index=self.tickers, columns=self.tickers)  
         
-        print('\nstd devs :')
-        print(dfStdDevs)
+        print('\nconditional vols :')
+        print(self.stdDevMatrix)
         
         self.generate_corr()        
-        self.covariance = np.dot(np.dot(dfStdDevs,self.corr),dfStdDevs)
+        covData = np.dot(np.dot(self.stdDevMatrix,self.corr),self.stdDevMatrix)
+        self.covariance = pd.DataFrame(covData,index=self.tickers, columns=self.tickers)
         
         print('\ncovariances :')
         print(self.covariance) 
